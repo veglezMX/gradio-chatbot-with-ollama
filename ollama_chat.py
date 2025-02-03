@@ -26,7 +26,6 @@ def convert_to_chat_message(msg):
     return msg
 
 def chatbot_response(message, history, selected_model):
-    print(f"Chatbot response: {message}, {history}, {selected_model}")
     if history is None:
         history = []
     history = [convert_to_chat_message(msg) for msg in history]
@@ -34,7 +33,7 @@ def chatbot_response(message, history, selected_model):
 
     url = "http://localhost:11434/api/generate"
     headers = {"Content-Type": "application/json"}
-    prompt = "\n".join([f"{msg.role}: {msg.content}" for msg in history])
+    prompt = "\n".join([f"{msg.role}: {msg.content}" for msg in history if not msg.metadata])
     payload = {"model": selected_model, "stream": True, "prompt": prompt}
     response = requests.post(url, json=payload, stream=True, headers=headers)
 
@@ -46,6 +45,7 @@ def chatbot_response(message, history, selected_model):
     accumulated_text = ""
     thinking_message = None
     thinking_start_time = None
+    end_thinking = False
 
     for line in response.iter_lines():
         if not line:
@@ -62,28 +62,30 @@ def chatbot_response(message, history, selected_model):
         chunk = data.get("response", "")
         accumulated_text += chunk
 
-        if accumulated_text.startswith("<think>"):
+        if accumulated_text.startswith("<think>") and "</think>" not in accumulated_text:
             if thinking_message is None:
                 thinking_start_time = time.time()
                 thinking_message = gr.ChatMessage(
                     content="",
                     metadata={"title": "Thinking...", "id": 0, "status": "pending"},
                 )
-
-            if "</think>" in accumulated_text:
-                thinking_message.metadata["status"] = "done"
-                thinking_message.metadata["time"] = time.time() - thinking_start_time
-                
             thinking_content = accumulated_text.split("<think>", 1)[1].strip()
             thinking_message.content = thinking_content
             yield thinking_message
+
+        elif "</think>" in accumulated_text:
+            end_thinking = True
+            thinking_message.metadata["status"] = "done"
+            thinking_message.metadata["time"] = time.time() - thinking_start_time
+            if end_thinking:
+                yield [thinking_message, gr.ChatMessage(content=accumulated_text.split("</think>")[1].strip(), role="assistant")]
         else:
             yield gr.ChatMessage(content=accumulated_text.strip(), role="assistant")
 
-    final_msg = gr.ChatMessage(content=accumulated_text.strip(), role="assistant")
     if thinking_message is not None:
-        final_msg = [thinking_message, final_msg]
-    yield final_msg
+        yield [thinking_message, gr.ChatMessage(content=accumulated_text.split("</think>")[1].strip(), role="assistant")]
+    else:
+        yield gr.ChatMessage(content=accumulated_text.strip(), role="assistant")
 
 with gr.Blocks() as demo:
     model_dropdown = gr.Dropdown(
@@ -102,10 +104,10 @@ with gr.Blocks() as demo:
     type="messages",
     title="Ollama Chat with DeepSeek 14b",
     description="This is a local instance of DeepSeek 14b. Please ask me anything.",
-    example_labels=["Verify model", "Drinking game example"],
+    example_labels=["Verify model", "English-Spanish translator"],
     examples=[
         ["Who are you? What is your name?"],
-        ["Generate ideas for drinking game"],
+        ["Act as translator, when I write something in English, you'll write its translation in Spanish and vice versa. Let's start: ¿Cómo está el clima?"],
     ],
     flagging_mode="manual",
     flagging_options=["Like", "Spam", "Inappropriate", "Other"],
