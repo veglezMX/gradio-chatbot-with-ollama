@@ -94,25 +94,24 @@ def chatbot_response(message, history):
 
 
 # Create a ChatInterface with Gradio.
-demo = gr.ChatInterface(
-    fn=chatbot_response,
-    chatbot=gr.Chatbot(
-        height=600,
-        placeholder="<strong>Your Personal AI assistance</strong><br>Ask Me Anything",
-        render_markdown=True
-    ),
-    type="messages",
-    title="Ollama Chat with DeepSeek 14b",
-    description="This is a local instance of DeepSeek 14b. Please ask me anything.",
-    example_labels=["Greetings", "Drinking game"],
-    examples=[
-        ["Hello, how are you?"],
-        ["Generate ideas for drinking game"],
-    ],
-    flagging_mode="manual",
-    flagging_options=["Like", "Spam", "Inappropriate", "Other"],
-    save_history=True,
-)
+with gr.Blocks() as demo:
+    model_dropdown = gr.Dropdown(
+        choices=get_available_models(),
+        value="llama3.2",  # default model
+        label="Select Model"
+    )
+    chat_history = gr.Chatbot()
+    text_input = gr.Textbox(placeholder="Enter message here...", label="Your Message")
+    
+    def process_message(message, history, selected_model):
+        return chatbot_response(message, history, selected_model)
+        
+    send_button = gr.Button("Send")
+    send_button.click(process_message, 
+                      inputs=[text_input, chat_history, model_dropdown], 
+                      outputs=chat_history)
+
+demo.launch()
 
 if __name__ == "__main__":
     demo.launch()
