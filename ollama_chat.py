@@ -1,12 +1,11 @@
 import json
 import logging
 import time
-from typing import Generator, Optional, Union
+from typing import Generator, Optional, Union, List
 
 import gradio as gr
 import requests
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -67,77 +66,122 @@ def convert_to_chat_message(
 
 
 
+class ChatStreamer:
+    """
+    Encapsulates the logic for streaming and processing responses from Ollama.
+    """
+    THINK_START_TAG = "<think>"
+    THINK_END_TAG = "</think>"
+
+    def __init__(self, client: OllamaClient, selected_model: str, prompt: str):
+        self.client = client
+        self.selected_model = selected_model
+        self.prompt = prompt
+        self.accumulated_text = ""
+        self.thinking_message: Optional[gr.ChatMessage] = None
+        self.thinking_start_time: Optional[float] = None
+
+    def stream(self) -> Generator[Union[gr.ChatMessage, List[gr.ChatMessage]], None, None]:
+        """Streams and yields chat messages as they are processed."""
+        response = self.client.stream_response(self.selected_model, self.prompt)
+
+        for line in response.iter_lines():
+            if not line:
+                continue
+
+            try:
+                data = json.loads(line.decode("utf-8"))
+                chunk = data.get("response", "")
+                self.accumulated_text += chunk
+
+                logger.info(f"Response chunk: {chunk}")
+                logger.info(f"Accumulated text: {self.accumulated_text}")
+
+                messages = self._process_accumulated_text()
+                for message in messages:
+                    yield message
+
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.error(f"Error processing response: {str(e)}")
+
+        for message in self._finalize_messages():
+            yield message
+
+    def _process_accumulated_text(self) -> List[Union[gr.ChatMessage, List[gr.ChatMessage]]]:
+        """Process the accumulated text and return messages based on thinking markers."""
+        messages: List[Union[gr.ChatMessage, List[gr.ChatMessage]]] = []
+
+        if self.accumulated_text.startswith(self.THINK_START_TAG) and self.THINK_END_TAG not in self.accumulated_text:
+            if self.thinking_message is None:
+                self.thinking_start_time = time.time()
+                self.thinking_message = gr.ChatMessage(
+                    content="",
+                    metadata={"title": "Thinking...", "id": 0, "status": "pending"},
+                )
+            thinking_content = self.accumulated_text.split(self.THINK_START_TAG, 1)[1].strip()
+            self.thinking_message.content = thinking_content
+            messages.append(self.thinking_message)
+
+        elif self.THINK_END_TAG in self.accumulated_text:
+            if self.thinking_message is not None:
+                self.thinking_message.metadata["status"] = "done"
+                if self.thinking_start_time:
+                    self.thinking_message.metadata["time"] = time.time() - self.thinking_start_time
+            assistant_text = self.accumulated_text.split(self.THINK_END_TAG, 1)[1].strip()
+            messages.append([self.thinking_message, gr.ChatMessage(content=assistant_text, role="assistant")])
+        else:
+            messages.append(gr.ChatMessage(content=self.accumulated_text.strip(), role="assistant"))
+
+        return messages
+
+    def _finalize_messages(self) -> List[Union[gr.ChatMessage, List[gr.ChatMessage]]]:
+        """
+        At the end of the streaming response, ensure that if a thinking message was used,
+        we yield both the final thinking message (with updated metadata) and the assistant's final response.
+        """
+        if self.thinking_message is not None and self.THINK_END_TAG in self.accumulated_text:
+            self.thinking_message.metadata["status"] = "done"
+            if self.thinking_start_time:
+                self.thinking_message.metadata["time"] = time.time() - self.thinking_start_time
+            assistant_text = self.accumulated_text.split(self.THINK_END_TAG, 1)[1].strip()
+            return [[self.thinking_message, gr.ChatMessage(content=assistant_text, role="assistant")]]
+        else:
+            return [gr.ChatMessage(content=self.accumulated_text.strip(), role="assistant")]
+
+def prepare_prompt(history: Optional[List[Union[gr.ChatMessage, dict, list]]], user_message: str) -> str:
+    """Prepare a prompt from chat history and the new user message."""
+    history = history or []
+    chat_history: List[gr.ChatMessage] = []
+
+    for msg in history:
+        converted = convert_to_chat_message(msg)
+        if isinstance(converted, list):
+            chat_history.extend(converted)
+        else:
+            chat_history.append(converted)
+
+    chat_history.append(gr.ChatMessage(content=user_message, role="user"))
+
+    prompt = "\n".join(
+        f"{msg.role}: {msg.content}"
+        for msg in chat_history
+        if not msg.metadata  # You can adjust this filter as needed.
+    )
+    return prompt
+
 
 def chatbot_response(
     message: str,
-    history: Optional[list[Union[gr.ChatMessage, dict, list]]],
+    history: Optional[List[Union[gr.ChatMessage, dict, list]]],
     selected_model: str
-) -> Generator[gr.ChatMessage, None, None]:
+) -> Generator[Union[gr.ChatMessage, List[gr.ChatMessage]], None, None]:
     """Handle chat responses with streaming and thinking indicators."""
-    client = OllamaClient()
-    history = history or []
-    
     try:
-        # Prepare chat history
-        chat_history = []
-        for msg in history:
-            converted = convert_to_chat_message(msg)
-            if isinstance(converted, list):
-                chat_history.extend(converted)
-            else:
-                chat_history.append(converted)
-        
-        chat_history.append(gr.ChatMessage(content=message, role="user"))
-        
-        # Generate prompt from conversation history
-        prompt = "\n".join(
-            f"{msg.role}: {msg.content}" 
-            for msg in chat_history 
-            if not msg.metadata
-        )
-        
-        # Stream response from Ollama
-        response = client.stream_response(selected_model, prompt)
-        accumulated_text = ""
-        thinking_message = None
-        end_thinking = False
+        client = OllamaClient()
+        prompt = prepare_prompt(history, message)
 
-        for line in response.iter_lines():
-            if line:
-                try:
-                    data = json.loads(line.decode("utf-8"))
-                    chunk = data.get("response", "")
-                    accumulated_text += chunk
-                    
-                    if accumulated_text.startswith("<think>") and "</think>" not in accumulated_text:
-                        if thinking_message is None:
-                            thinking_start_time = time.time()
-                            thinking_message = gr.ChatMessage(
-                                content="",
-                                metadata={"title": "Thinking...", "id": 0, "status": "pending"},
-                            )
-                        thinking_content = accumulated_text.split("<think>", 1)[1].strip()
-                        thinking_message.content = thinking_content
-                        yield thinking_message
-
-                    elif "</think>" in accumulated_text:
-                        end_thinking = True
-                        thinking_message.metadata["status"] = "done"
-                        thinking_message.metadata["time"] = time.time() - thinking_start_time
-                        if end_thinking:
-                            yield [thinking_message, gr.ChatMessage(content=accumulated_text.split("</think>")[1].strip(), role="assistant")]
-                    else:
-                        yield gr.ChatMessage(content=accumulated_text.strip(), role="assistant")
-
-                   
-                        
-                except (json.JSONDecodeError, KeyError) as e:
-                    logger.error(f"Error processing response: {str(e)}")
-
-        if thinking_message is not None:
-            yield [thinking_message, gr.ChatMessage(content=accumulated_text.split("</think>")[1].strip(), role="assistant")]
-        else:
-            yield gr.ChatMessage(content=accumulated_text.strip(), role="assistant")
+        streamer = ChatStreamer(client, selected_model, prompt)
+        yield from streamer.stream()
 
     except Exception as e:
         error_msg = f"Error: {str(e)}"
