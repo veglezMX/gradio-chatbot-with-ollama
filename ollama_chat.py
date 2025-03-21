@@ -94,9 +94,6 @@ class ChatStreamer:
                 chunk = data.get("response", "")
                 self.accumulated_text += chunk
 
-                logger.info(f"Response chunk: {chunk}")
-                logger.info(f"Accumulated text: {self.accumulated_text}")
-
                 messages = self._process_accumulated_text()
                 for message in messages:
                     yield message
@@ -148,9 +145,11 @@ class ChatStreamer:
         else:
             return [gr.ChatMessage(content=self.accumulated_text.strip(), role="assistant")]
 
-def prepare_prompt(history: Optional[List[Union[gr.ChatMessage, dict, list]]], user_message: str) -> str:
+def prepare_prompt(history: Optional[List[Union[gr.ChatMessage, dict, list]]], user_message: str, custom_instructions="") -> str:
     """Prepare a prompt from chat history and the new user message."""
     history = history or []
+    if custom_instructions:
+        history.insert(0, gr.ChatMessage(content=custom_instructions, role="system"))
     chat_history: List[gr.ChatMessage] = []
 
     for msg in history:
@@ -165,7 +164,7 @@ def prepare_prompt(history: Optional[List[Union[gr.ChatMessage, dict, list]]], u
     prompt = "\n".join(
         f"{msg.role}: {msg.content}"
         for msg in chat_history
-        if not msg.metadata  # You can adjust this filter as needed.
+        if not msg.metadata  
     )
     return prompt
 
@@ -173,12 +172,13 @@ def prepare_prompt(history: Optional[List[Union[gr.ChatMessage, dict, list]]], u
 def chatbot_response(
     message: str,
     history: Optional[List[Union[gr.ChatMessage, dict, list]]],
-    selected_model: str
+    selected_model: str,
+    custom_instructions=""
 ) -> Generator[Union[gr.ChatMessage, List[gr.ChatMessage]], None, None]:
     """Handle chat responses with streaming and thinking indicators."""
     try:
         client = OllamaClient()
-        prompt = prepare_prompt(history, message)
+        prompt = prepare_prompt(history, message, custom_instructions)
 
         streamer = ChatStreamer(client, selected_model, prompt)
         yield from streamer.stream()
@@ -200,26 +200,34 @@ def create_interface() -> gr.Blocks:
             )
             refresh_btn = gr.Button("Refresh Models", scale=1)
 
-        gr.ChatInterface(
-            fn=chatbot_response,
-            additional_inputs=[model_dropdown],
-            chatbot=gr.Chatbot(
-                height=600,
-                render_markdown=True,
-                placeholder="Your AI Assistant Ready to Help!",
-                layout="panel"
-            ),
-            type="messages",
-            title="Local Ollama Chat",
-            description="Chat with locally running Ollama models",
-            example_labels=["Introduction", "Poetry"],
-            examples=[
-                ["Who are you? What is your name?"],
-                ["Write a poem about artificial intelligence"]
-            ],
-            cache_examples=False,
-            analytics_enabled=False
+        custom_instructions = gr.Textbox(
+            label="Instructions",
+            placeholder="Provide any custom instructions here...",
+            lines=3,
+            scale=4
         )
+
+        with gr.Row():
+            gr.ChatInterface(
+                fn=chatbot_response,
+                additional_inputs=[model_dropdown, custom_instructions],
+                # chatbot=gr.Chatbot(
+                #     height=600,
+                #     render_markdown=True,
+                #     placeholder="Your AI Assistant Ready to Help!",
+                #     layout="panel"
+                # ),
+                type="messages",
+                title="Local Ollama Chat",
+                description="Chat with locally running Ollama models",
+                example_labels=["Introduction", "Poetry"],
+                examples=[
+                    ["Who are you? What is your name?"],
+                    ["Write a poem about artificial intelligence"]
+                ],
+                cache_examples=False,
+                analytics_enabled=False
+            )
 
         def load_models():
             """Refresh available models in dropdown."""
@@ -237,4 +245,4 @@ def create_interface() -> gr.Blocks:
 
 if __name__ == "__main__":
     interface = create_interface()
-    interface.launch(server_port=7860, share=False)
+    interface.launch(inbrowser=True, server_port=7860, share=False)
