@@ -13,18 +13,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-app = FastAPI()
-
-@app.get("/set-cookie")
-def set_cookie(response: Response):
-    response.set_cookie(key="username", value="valen", httponly=True)
-    return {"message": "Cookie set"}
-
-@app.get("/get-cookie")
-def get_cookie(request: Request):
-    username = request.cookies.get("username")
-    return {"username": username}
-
 
 class OllamaClient:
     """Client for interacting with the Ollama API."""
@@ -280,22 +268,10 @@ def create_interface() -> gr.Blocks:
     return demo
 
 
-import uvicorn
-from fastapi.middleware.cors import CORSMiddleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=True,
-    allow_methods=["*"], 
-    allow_headers=["*"], 
-)
-
 if __name__ == "__main__":
     interface = create_interface()
-    gr.mount_gradio_app(app, interface, path="/gradio")
-    uvicorn.run(
-        app,
-        host="__main__",
-        port=8000,
-        log_level="info"
+    interface.launch(
+        inbrowser=True,
+        server_port=7860,
+        share=False
     )
