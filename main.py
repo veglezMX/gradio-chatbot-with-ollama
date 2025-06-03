@@ -1,19 +1,37 @@
 import json
+import os
 import logging
 import time
 from typing import Generator, Optional, Union, List
 
 import gradio as gr
 import requests
+ 
+from fastapi import FastAPI, Response, Request
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+app = FastAPI()
+
+@app.get("/set-cookie")
+def set_cookie(response: Response):
+    response.set_cookie(key="username", value="valen", httponly=True)
+    return {"message": "Cookie set"}
+
+@app.get("/get-cookie")
+def get_cookie(request: Request):
+    username = request.cookies.get("username")
+    return {"username": username}
 
 
 class OllamaClient:
     """Client for interacting with the Ollama API."""
     
     def __init__(self, base_url: str = "http://localhost:11434"):
+        # Allow overriding the base URL via environment variable
+        base_url = os.getenv("OLLAMA_BASE_URL", base_url)
         self.base_url = base_url
         self.session = requests.Session()
         self.timeout = 30
@@ -63,7 +81,6 @@ def convert_to_chat_message(
     if isinstance(msg, list):
         return [convert_to_chat_message(m) for m in msg]
     raise ValueError(f"Unsupported message type: {type(msg)}")
-
 
 
 class ChatStreamer:
@@ -145,11 +162,24 @@ class ChatStreamer:
         else:
             return [gr.ChatMessage(content=self.accumulated_text.strip(), role="assistant")]
 
-def prepare_prompt(history: Optional[List[Union[gr.ChatMessage, dict, list]]], user_message: str, custom_instructions="") -> str:
+def prepare_prompt(
+        history: Optional[List[Union[gr.ChatMessage, dict, list]]], 
+        user_message: str, 
+        custom_instructions="",
+        thinking_enabled: bool = True
+        ) -> str:
     """Prepare a prompt from chat history and the new user message."""
     history = history or []
+    thinking_instruction = "/think" if thinking_enabled else "/no_think"
+
+    if custom_instructions:
+        custom_instructions = f"{custom_instructions}\n{thinking_instruction}"
+    else:
+        custom_instructions = thinking_instruction
+    
     if custom_instructions:
         history.insert(0, gr.ChatMessage(content=custom_instructions, role="system"))
+    
     chat_history: List[gr.ChatMessage] = []
 
     for msg in history:
@@ -159,7 +189,8 @@ def prepare_prompt(history: Optional[List[Union[gr.ChatMessage, dict, list]]], u
         else:
             chat_history.append(converted)
 
-    chat_history.append(gr.ChatMessage(content=user_message, role="user"))
+    user_message_with_thinking = f"{user_message} {thinking_instruction}"
+    chat_history.append(gr.ChatMessage(content=user_message_with_thinking, role="user"))
 
     prompt = "\n".join(
         f"{msg.role}: {msg.content}"
@@ -173,12 +204,13 @@ def chatbot_response(
     message: str,
     history: Optional[List[Union[gr.ChatMessage, dict, list]]],
     selected_model: str,
-    custom_instructions=""
+    custom_instructions="",
+    thinking_enabled: bool = True
 ) -> Generator[Union[gr.ChatMessage, List[gr.ChatMessage]], None, None]:
     """Handle chat responses with streaming and thinking indicators."""
     try:
         client = OllamaClient()
-        prompt = prepare_prompt(history, message, custom_instructions)
+        prompt = prepare_prompt(history, message, custom_instructions,thinking_enabled)
 
         streamer = ChatStreamer(client, selected_model, prompt)
         yield from streamer.stream()
@@ -199,6 +231,12 @@ def create_interface() -> gr.Blocks:
                 scale=4
             )
             refresh_btn = gr.Button("Refresh Models", scale=1)
+            thinking_toggle = gr.Checkbox(
+                label="Enable Thinking Mode",
+                value=True,
+                scale=1,
+                info="Show model's reasoning process"
+            )
 
         custom_instructions = gr.Textbox(
             label="Instructions",
@@ -210,13 +248,12 @@ def create_interface() -> gr.Blocks:
         with gr.Row():
             gr.ChatInterface(
                 fn=chatbot_response,
-                additional_inputs=[model_dropdown, custom_instructions],
-                # chatbot=gr.Chatbot(
-                #     height=600,
-                #     render_markdown=True,
-                #     placeholder="Your AI Assistant Ready to Help!",
-                #     layout="panel"
-                # ),
+                additional_inputs=[model_dropdown, custom_instructions,thinking_toggle],
+                chatbot=gr.Chatbot(
+                    render_markdown=True,
+                    placeholder="Your AI Assistant Ready to Help!",
+                    layout="bubble"
+                ),
                 type="messages",
                 title="Local Ollama Chat",
                 description="Chat with locally running Ollama models",
@@ -243,6 +280,22 @@ def create_interface() -> gr.Blocks:
     return demo
 
 
+import uvicorn
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"], 
+    allow_headers=["*"], 
+)
+
 if __name__ == "__main__":
     interface = create_interface()
-    interface.launch(inbrowser=True, server_port=7860, share=False)
+    gr.mount_gradio_app(app, interface, path="/gradio")
+    uvicorn.run(
+        app,
+        host="__main__",
+        port=8000,
+        log_level="info"
+    )

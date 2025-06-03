@@ -25,7 +25,8 @@ Thumbs.db
 .idea/
 *.iml
 
-.gradio/ # Ignore Gradio files
+# Ignore Gradio files
+.gradio/ 
 
 # Ignore Python virtual environment
 .venv/

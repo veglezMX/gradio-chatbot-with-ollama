@@ -1,0 +1,16 @@
+services:
+  chat-app:
+    restart: always
+    environment:
+      - LOG_LEVEL=warning
+    # Remove volume mounts in production
+    volumes: []
+    
+  ollama:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 4G
