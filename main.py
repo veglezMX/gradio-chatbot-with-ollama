@@ -101,13 +101,16 @@ class ChatStreamer:
 
                 messages = self._process_accumulated_text()
                 for message in messages:
-                    yield message
+                    if message is not None:
+                        yield message
 
             except (json.JSONDecodeError, KeyError) as e:
                 logger.error(f"Error processing response: {str(e)}")
 
-        for message in self._finalize_messages():
-            yield message
+        final_messages = self._finalize_messages()
+        for message in final_messages:
+            if message is not None:  
+                yield message
 
     def _process_accumulated_text(self) -> List[Union[gr.ChatMessage, List[gr.ChatMessage]]]:
         """Process the accumulated text and return messages based on thinking markers."""
@@ -129,9 +132,14 @@ class ChatStreamer:
                 self.thinking_message.metadata["status"] = "done"
                 if self.thinking_start_time:
                     self.thinking_message.metadata["time"] = time.time() - self.thinking_start_time
-            assistant_text = self.accumulated_text.split(self.THINK_END_TAG, 1)[1].strip()
-            messages.append([self.thinking_message, gr.ChatMessage(content=assistant_text, role="assistant")])
-        else:
+                assistant_text = self.accumulated_text.split(self.THINK_END_TAG, 1)[1].strip()
+                messages.append([self.thinking_message, gr.ChatMessage(content=assistant_text, role="assistant")])
+            else:
+                # Handle case where thinking end tag appears without a proper thinking message
+                assistant_text = self.accumulated_text.split(self.THINK_END_TAG, 1)[1].strip()
+                if assistant_text:
+                    messages.append(gr.ChatMessage(content=assistant_text, role="assistant"))
+        elif self.accumulated_text.strip():
             messages.append(gr.ChatMessage(content=self.accumulated_text.strip(), role="assistant"))
 
         return messages
@@ -146,9 +154,21 @@ class ChatStreamer:
             if self.thinking_start_time:
                 self.thinking_message.metadata["time"] = time.time() - self.thinking_start_time
             assistant_text = self.accumulated_text.split(self.THINK_END_TAG, 1)[1].strip()
-            return [[self.thinking_message, gr.ChatMessage(content=assistant_text, role="assistant")]]
-        else:
+            if assistant_text:
+                return [[self.thinking_message, gr.ChatMessage(content=assistant_text, role="assistant")]]
+            else:
+                # If there's no text after the thinking tag, just return the thinking message
+                return [self.thinking_message]
+        elif self.thinking_message is not None and self.THINK_START_TAG in self.accumulated_text:
+            # Thinking started but never ended - finalize it
+            self.thinking_message.metadata["status"] = "done"
+            if self.thinking_start_time:
+                self.thinking_message.metadata["time"] = time.time() - self.thinking_start_time
+            return [self.thinking_message]
+        elif self.accumulated_text.strip():
             return [gr.ChatMessage(content=self.accumulated_text.strip(), role="assistant")]
+        else:
+            return [gr.ChatMessage(content="I apologize, but I didn't generate a response.", role="assistant")]
 
 def prepare_prompt(
         history: Optional[List[Union[gr.ChatMessage, dict, list]]], 
@@ -187,22 +207,100 @@ def prepare_prompt(
     )
     return prompt
 
+def prepare_prompt_deepseek(
+    history: Optional[List[Union[gr.ChatMessage, dict, list]]], 
+    user_message: str, 
+    custom_instructions: str = "",
+    thinking_enabled: bool = True
+) -> str:
+    """Prepare a prompt from chat history for DeepSeek-R1 with thinking control."""
+    history = history or []
+    
+    if custom_instructions:
+        history.insert(0, gr.ChatMessage(content=custom_instructions, role="system"))
+    
+    chat_history: List[gr.ChatMessage] = []
+
+    for msg in history:
+        converted = convert_to_chat_message(msg)
+        if isinstance(converted, list):
+            chat_history.extend(converted)
+        else:
+            chat_history.append(converted)
+
+    chat_history.append(gr.ChatMessage(content=user_message, role="user"))
+
+    prompt_parts = []
+    
+    for msg in chat_history:
+        if not msg.metadata:  
+            if msg.role == "user":
+                prompt_parts.append(f"<｜User｜>{msg.content}")
+            elif msg.role == "assistant":
+                prompt_parts.append(f"<｜Assistant｜>{msg.content}<｜end▁of▁sentence｜>")
+            elif msg.role == "system":
+                prompt_parts.append(msg.content)
+    
+    if thinking_enabled:
+        prompt_parts.append("<｜Assistant｜>")
+    else:
+        prompt_parts.append("<｜Assistant｜><think>\n\n</think>\n\n")
+    
+    return "\n".join(prompt_parts)
+
+def has_thinking_capability(model_name: str) -> bool:
+    if not model_name or not isinstance(model_name, str):
+        return False
+    
+    model_lower = model_name.lower().strip()
+    
+    thinking_patterns = [
+        "qwen3", "qwq",
+        "deepseek-r1", "deepseek-reasoner", 
+        "reasoning", "think",
+        "r1", "o1"
+    ]
+    
+    return any(pattern in model_lower for pattern in thinking_patterns)
 
 def chatbot_response(
     message: str,
     history: Optional[List[Union[gr.ChatMessage, dict, list]]],
     selected_model: str,
     custom_instructions="",
-    thinking_enabled: bool = True
+    thinking_enabled: Optional[bool] = None
 ) -> Generator[Union[gr.ChatMessage, List[gr.ChatMessage]], None, None]:
     """Handle chat responses with streaming and thinking indicators."""
     try:
         client = OllamaClient()
-        prompt = prepare_prompt(history, message, custom_instructions,thinking_enabled)
+        if thinking_enabled is None:
+            thinking_enabled = has_thinking_capability(selected_model)
+
+        if "deepseek" in selected_model.lower():
+            prompt = prepare_prompt_deepseek(history, message, custom_instructions, thinking_enabled)
+        else:
+            prompt = prepare_prompt(history, message, custom_instructions, thinking_enabled)
 
         streamer = ChatStreamer(client, selected_model, prompt)
-        yield from streamer.stream()
+        has_yielded = False
+        for response in streamer.stream():
+            if response is not None:
+                if isinstance(response, list):
+                    filtered_responses = [msg for msg in response if msg is not None]
+                    if filtered_responses:
+                        yield filtered_responses
+                        has_yielded = True
+                else:
+                    yield response
+                    has_yielded = True
+        
+        if not has_yielded:
+            yield gr.ChatMessage(content="I apologize, but I couldn't generate a response.", role="assistant")
 
+    except requests.exceptions.ConnectionError:
+        error_msg = "Error: Cannot connect to Ollama server. Is it running?"
+        logger.error(error_msg)
+        yield gr.ChatMessage(content=error_msg, role="assistant")
     except Exception as e:
         error_msg = f"Error: {str(e)}"
         logger.error(error_msg)
@@ -216,15 +314,19 @@ def create_interface() -> gr.Blocks:
             model_dropdown = gr.Dropdown(
                 label="Select Model",
                 interactive=True,
-                scale=4
+                scale=3
             )
             refresh_btn = gr.Button("Refresh Models", scale=1)
+        
+        with gr.Row():
             thinking_toggle = gr.Checkbox(
                 label="Enable Thinking Mode",
                 value=True,
-                scale=1,
+                visible=False,
                 info="Show model's reasoning process"
             )
+
+        model_info = gr.Markdown("Select a model to see thinking control method")
 
         custom_instructions = gr.Textbox(
             label="Instructions",
@@ -233,22 +335,46 @@ def create_interface() -> gr.Blocks:
             scale=4
         )
 
+        def update_model_interface(model_name):
+            """Update UI based on selected model capabilities."""
+            has_thinking = has_thinking_capability(model_name)
+            
+            if model_name and "deepseek" in model_name.lower():
+                info_text = "**DeepSeek-R1 detected**: Reasoning model with thinking capabilities"
+            elif model_name and "qwen3" in model_name.lower():
+                info_text = "**Qwen3 detected**: Hybrid reasoning model with thinking mode"
+            elif has_thinking:
+                info_text = f"**Reasoning model detected**: {model_name} supports thinking mode"
+            else:
+                info_text = f"**Standard model**: {model_name} - Direct response mode"
+            
+            # Return updated components: model_info, thinking_toggle visibility
+            return info_text, gr.Checkbox(visible=has_thinking, value=has_thinking)
+
+        model_dropdown.change(
+            update_model_interface, 
+            inputs=model_dropdown, 
+            outputs=[model_info, thinking_toggle]
+        )
+
         with gr.Row():
             gr.ChatInterface(
                 fn=chatbot_response,
-                additional_inputs=[model_dropdown, custom_instructions,thinking_toggle],
+                additional_inputs=[model_dropdown, custom_instructions, thinking_toggle],
                 chatbot=gr.Chatbot(
+                    type="messages",
                     render_markdown=True,
                     placeholder="Your AI Assistant Ready to Help!",
                     layout="bubble"
                 ),
                 type="messages",
-                title="Local Ollama Chat",
-                description="Chat with locally running Ollama models",
-                example_labels=["Introduction", "Poetry"],
+                title="Smart Multi-Model Chat",
+                description="Automatically detects model capabilities and adjusts thinking controls.",
+                example_labels=["Simple Question", "Complex Math", "Coding Problem"],
                 examples=[
-                    ["Who are you? What is your name?"],
-                    ["Write a poem about artificial intelligence"]
+                    ["What is the capital of France?"],
+                    ["Solve this step by step: What's the derivative of x^3 + 2x^2 - 5x + 1?"],
+                    ["Write a Python function to calculate fibonacci numbers efficiently"]
                 ],
                 cache_examples=False,
                 analytics_enabled=False
@@ -257,13 +383,30 @@ def create_interface() -> gr.Blocks:
         def load_models():
             """Refresh available models in dropdown."""
             models = OllamaClient().fetch_models()
-            return gr.Dropdown(
-                choices=models,
-                value=models[0] if models else None
+            selected_model = models[0] if models else None
+            
+            # Update both dropdown and thinking toggle visibility
+            has_thinking = has_thinking_capability(selected_model)
+            info_text = "Select a model to see capabilities"
+            
+            if selected_model:
+                if "deepseek" in selected_model.lower():
+                    info_text = "**DeepSeek-R1 detected**: Reasoning model with thinking capabilities"
+                elif "qwen3" in selected_model.lower():
+                    info_text = "**Qwen3 detected**: Hybrid reasoning model with thinking mode"
+                elif has_thinking:
+                    info_text = f"**Reasoning model detected**: {selected_model} supports thinking mode"
+                else:
+                    info_text = f"**Standard model**: {selected_model} - Direct response mode"
+            
+            return (
+                gr.Dropdown(choices=models, value=selected_model),
+                info_text,
+                gr.Checkbox(visible=has_thinking, value=True)
             )
 
-        demo.load(load_models, outputs=model_dropdown)
-        refresh_btn.click(load_models, outputs=model_dropdown)
+        demo.load(load_models, outputs=[model_dropdown, model_info, thinking_toggle])
+        refresh_btn.click(load_models, outputs=[model_dropdown, model_info, thinking_toggle])
 
     return demo
 
