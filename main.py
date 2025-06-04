@@ -2,12 +2,12 @@ import json
 import os
 import logging
 import time
+import re
 from typing import Generator, Optional, Union, List
 
 import gradio as gr
 import requests
  
-from fastapi import FastAPI, Response, Request
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,8 +18,7 @@ class OllamaClient:
     """Client for interacting with the Ollama API."""
     
     def __init__(self, base_url: str = "http://localhost:11434"):
-        # Allow overriding the base URL via environment variable
-        base_url = os.getenv("OLLAMA_BASE_URL", base_url)
+        base_url = os.getenv("OLLOMA_BASE_URL", base_url)
         self.base_url = base_url
         self.session = requests.Session()
         self.timeout = 30
@@ -37,6 +36,20 @@ class OllamaClient:
             logger.error(f"Failed to fetch models: {str(e)}")
             return []
 
+    def get_model_info(self, model_name: str) -> dict:
+        """Get detailed information about a specific model."""
+        try:
+            response = self.session.post(
+                f"{self.base_url}/api/show",
+                json={"name": model_name},
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.debug(f"Failed to fetch model info for {model_name}: {str(e)}")
+            return {}
+
     def stream_response(self, model: str, prompt: str) -> requests.Response:
         """Stream response from the Ollama generate API."""
         try:
@@ -53,6 +66,145 @@ class OllamaClient:
             logger.error(f"API request failed: {str(e)}")
             raise
 
+
+def extract_model_details(model_name: str) -> dict:
+    """Extract available model details from Ollama API."""
+    details = {}
+    
+    try:
+        client = OllamaClient()
+        model_info = client.get_model_info(model_name)
+        if not model_info:
+            return details
+        
+        if "details" in model_info:
+            model_details = model_info["details"]
+            if "parameter_size" in model_details:
+                details["parameter_size"] = model_details["parameter_size"]
+            if "quantization_level" in model_details:
+                details["quantization"] = model_details["quantization_level"]
+        
+        context_found = False
+        if "model_info" in model_info:
+            for key, value in model_info["model_info"].items():
+                if "context_length" in key.lower():
+                    ctx_size = int(value)
+                    if ctx_size >= 1000:
+                        details["context_window"] = f"{ctx_size // 1000}K"
+                    else:
+                        details["context_window"] = str(ctx_size)
+                    context_found = True
+                    break
+        
+        if not context_found and "modelfile" in model_info:
+            modelfile = model_info["modelfile"]
+            
+            # Try multiple patterns for context size
+            patterns = [
+                r'PARAMETER\s+num_ctx\s+(\d+)',
+                r'num_ctx\s+(\d+)',
+                r'context[_-]?length\s*[:=]\s*(\d+)',
+                r'context[_-]?size\s*[:=]\s*(\d+)',
+                r'ctx[_-]?len\s*[:=]\s*(\d+)'
+            ]
+            
+            for pattern in patterns:
+                ctx_match = re.search(pattern, modelfile, re.IGNORECASE)
+                if ctx_match:
+                    ctx_size = int(ctx_match.group(1))
+                    if ctx_size >= 1000:
+                        details["context_window"] = f"{ctx_size // 1000}K"
+                    else:
+                        details["context_window"] = str(ctx_size)
+                    context_found = True
+                    break
+            
+            # Look for temperature setting
+            temp_match = re.search(r'PARAMETER\s+temperature\s+([\d.]+)', modelfile)
+            if temp_match:
+                details["temperature"] = temp_match.group(1)
+        
+        if not context_found and "template" in model_info:
+            template = model_info["template"]
+            ctx_match = re.search(r'(\d+)[kK]?\s*(?:tokens?|context)', template, re.IGNORECASE)
+            if ctx_match:
+                ctx_value = ctx_match.group(1)
+                if 'k' in ctx_match.group(0).lower():
+                    details["context_window"] = f"{ctx_value}K"
+                else:
+                    details["context_window"] = ctx_value
+                context_found = True
+        
+        if "details" in model_info and "family" in model_info["details"]:
+            details["family"] = model_info["details"]["family"]
+        
+        if "details" in model_info and "format" in model_info["details"]:
+            details["format"] = model_info["details"]["format"]
+        
+            
+    except Exception as e:
+        logger.debug(f"Could not extract model details: {e}")
+    
+    return details
+
+
+def format_model_info(model_name: str) -> str:
+    """Format model information based on available data."""
+    if not model_name:
+        return "Select a model to see available information"
+    
+    # Check thinking capability
+    has_thinking = has_thinking_capability(model_name)
+    
+    # Get dynamic model details
+    details = extract_model_details(model_name)
+    
+    # Start building the info text
+    info_parts = []
+    
+    # Model type based on thinking capability
+    if "deepseek-r1" in model_name.lower():
+        info_parts.append("**DeepSeek-R1** - Advanced reasoning model")
+    elif "qwen3" in model_name.lower() or "qwq" in model_name.lower():
+        info_parts.append("**Qwen** - Reasoning model")
+    elif has_thinking:
+        info_parts.append(f"**{model_name}** - Model with thinking capabilities")
+    else:
+        info_parts.append(f"**{model_name}**")
+    
+    # Add capabilities
+    if has_thinking:
+        info_parts.append("✅ Thinking mode supported")
+    else:
+        info_parts.append("💬 Direct response mode")
+    
+    # Add available details from API
+    detail_lines = []
+    
+    if "context_window" in details:
+        detail_lines.append(f"📏 Context: {details['context_window']} tokens")
+    
+    if "parameter_size" in details:
+        detail_lines.append(f"💾 Parameters: {details['parameter_size']}")
+    
+    if "quantization" in details:
+        detail_lines.append(f"🔢 Quantization: {details['quantization']}")
+    
+    if "family" in details:
+        detail_lines.append(f"👨‍👩‍👧‍👦 Family: {details['family']}")
+    
+    if "format" in details:
+        detail_lines.append(f"📦 Format: {details['format']}")
+    
+    if "temperature" in details:
+        detail_lines.append(f"🌡️ Default temp: {details['temperature']}")
+    
+    # Combine all parts
+    if detail_lines:
+        info_parts.append("")  # Empty line for spacing
+        info_parts.extend(detail_lines)
+    
+    return "\n".join(info_parts)
 
 def convert_to_chat_message(
     msg: Union[gr.ChatMessage, dict, list]
@@ -338,15 +490,7 @@ def create_interface() -> gr.Blocks:
         def update_model_interface(model_name):
             """Update UI based on selected model capabilities."""
             has_thinking = has_thinking_capability(model_name)
-            
-            if model_name and "deepseek" in model_name.lower():
-                info_text = "**DeepSeek-R1 detected**: Reasoning model with thinking capabilities"
-            elif model_name and "qwen3" in model_name.lower():
-                info_text = "**Qwen3 detected**: Hybrid reasoning model with thinking mode"
-            elif has_thinking:
-                info_text = f"**Reasoning model detected**: {model_name} supports thinking mode"
-            else:
-                info_text = f"**Standard model**: {model_name} - Direct response mode"
+            info_text = format_model_info(model_name)
             
             # Return updated components: model_info, thinking_toggle visibility
             return info_text, gr.Checkbox(visible=has_thinking, value=has_thinking)
@@ -387,17 +531,7 @@ def create_interface() -> gr.Blocks:
             
             # Update both dropdown and thinking toggle visibility
             has_thinking = has_thinking_capability(selected_model)
-            info_text = "Select a model to see capabilities"
-            
-            if selected_model:
-                if "deepseek" in selected_model.lower():
-                    info_text = "**DeepSeek-R1 detected**: Reasoning model with thinking capabilities"
-                elif "qwen3" in selected_model.lower():
-                    info_text = "**Qwen3 detected**: Hybrid reasoning model with thinking mode"
-                elif has_thinking:
-                    info_text = f"**Reasoning model detected**: {selected_model} supports thinking mode"
-                else:
-                    info_text = f"**Standard model**: {selected_model} - Direct response mode"
+            info_text = format_model_info(selected_model)
             
             return (
                 gr.Dropdown(choices=models, value=selected_model),
