@@ -16,9 +16,9 @@ if [ ! -d ".venv" ]; then
     exit 1
 fi
 
-# Check if ollama_chat.py exists
-if [ ! -f "ollama_chat.py" ]; then
-    echo -e "\033[31mollama_chat.py not found!\033[0m"
+# Check if main.py exists
+if [ ! -f "main.py" ]; then
+    echo -e "\033[31mmain.py not found!\033[0m"
     echo -e "\033[33mPlease ensure you're in the correct directory\033[0m"
     exit 1
 fi
@@ -64,7 +64,7 @@ echo ""
 (sleep 2 && open_browser "http://localhost:7860") &
 
 # Run the Python application
-python ollama_chat.py
+python main.py
 
 # Check exit code
 if [ $? -ne 0 ]; then

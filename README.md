@@ -23,26 +23,41 @@ A modern, feature-rich chat interface for Ollama with real-time streaming, model
 ### Windows
 
 1. **Clone the repository:**
-   ```powershell
+   ```cmd
    git clone https://github.com/yourusername/ollama-chat.git
    cd ollama-chat
    ```
 
 2. **Run the setup script (first time only):**
-   ```powershell
-   .\setup-windows.ps1
+   ```cmd
+   setup-windows.bat
    ```
 
 3. **Run the application:**
-   ```powershell
-   .\run-windows.ps1
+   ```cmd
+   run-windows.bat
    ```
 
-4. **Create a desktop shortcut (optional):**
-   - Right-click on `run-windows.ps1`
-   - Select "Create shortcut"
-   - Move the shortcut to your desktop
-   - Rename it to "Ollama Chat"
+4. **Create a desktop shortcut (recommended):**
+   
+   **Method 1: Using File Explorer**
+   - Navigate to your ollama-chat folder in File Explorer
+   - Right-click on `run-windows.bat`
+   - Select "Send to" → "Desktop (create shortcut)"
+   - Rename the shortcut to "Ollama Chat"
+   
+   **Method 2: Manual creation**
+   - Right-click on your desktop
+   - Select "New" → "Shortcut"
+   - Browse to your ollama-chat folder and select `run-windows.bat`
+   - Name the shortcut "Ollama Chat"
+   - Click "Finish"
+   
+   **Optional: Customize the shortcut icon**
+   - Right-click the desktop shortcut and select "Properties"
+   - Click "Change Icon..." button
+   - Browse to `C:\Windows\System32\shell32.dll` and select an appropriate icon
+   - Click "OK" to apply
 
 ### Linux/macOS
 
@@ -83,8 +98,8 @@ If you prefer to set up manually:
 2. **Activate the virtual environment:**
    
    Windows:
-   ```powershell
-   .\.venv\Scripts\Activate.ps1
+   ```cmd
+   .venv\Scripts\activate.bat
    ```
    
    Linux/macOS:
@@ -99,12 +114,12 @@ If you prefer to set up manually:
 
 4. **Run the application:**
    ```bash
-   python ollama_chat.py
+   python main.py
    ```
 
 ## Configuration
 
-The application runs on `http://localhost:7860` by default. You can modify the port by editing the last line in `ollama_chat.py`:
+The application runs on `http://localhost:7860` by default. You can modify the port by editing the last line in `main.py`:
 
 ```python
 demo.launch(server_name="localhost", server_port=7860)
@@ -125,11 +140,11 @@ demo.launch(server_name="localhost", server_port=7860)
 - Make scripts executable: `chmod +x *.sh`
 - Run with proper permissions
 
-### PowerShell execution policy (Windows)
-If you get an execution policy error, run:
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
+### cURL not found (Windows)
+If cURL is not found when running the batch files:
+- cURL is included in Windows 10 version 1803 and later
+- For older Windows versions, install cURL manually or update Windows
+- Alternatively, you can skip the Ollama connectivity check and run the app directly
 
 ## Contributing
 
