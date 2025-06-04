@@ -56,28 +56,53 @@ A modern, feature-rich chat interface for Ollama with real-time streaming, model
    .\run-windows.ps1
    ```
 
+   **💡 Pro Tip:** Set up a desktop shortcut with a keyboard shortcut (e.g., Ctrl+Alt+O) for instant access! See step 4 below.
+
 4. **Create a desktop shortcut (recommended):**
    
-   **Method 1: Using File Explorer**
-   - Navigate to your ollama-chat folder in File Explorer
-   - Right-click on your preferred script (`run-windows.ps1` or `run-full-windows.ps1`)
-   - Select "Send to" → "Desktop (create shortcut)"
-   - Rename the shortcut to "Ollama Chat"
+   **Method 1: Create a proper PowerShell shortcut**
+   - Right-click on your desktop
+   - Select "New" → "Shortcut"
+   - In the location field, enter one of these commands (adjust path as needed):
+     
+     For the simple script:
+     ```
+     powershell.exe -ExecutionPolicy Bypass -File "C:\path\to\ollama-chat\run-windows.ps1"
+     ```
+     
+     For the full-featured script:
+     ```
+     powershell.exe -ExecutionPolicy Bypass -File "C:\path\to\ollama-chat\run-full-windows.ps1"
+     ```
    
-   **Method 2: Create a batch launcher**
-   Create a new file `OllamaChat.bat` on your desktop with:
-   ```batch
-   @echo off
-   cd /d "C:\path\to\ollama-chat"
-   powershell -ExecutionPolicy Bypass -File ".\run-windows.ps1"
-   pause
-   ```
+   - Click "Next" and name it "Ollama Chat"
+   - Click "Finish"
    
-   **Optional: Customize the shortcut icon**
-   - Right-click the desktop shortcut and select "Properties"
+   **Method 2: Modify an existing shortcut**
+   - Create a shortcut to the .ps1 file using "Send to" → "Desktop"
+   - Right-click the shortcut and select "Properties"
+   - In the "Target" field, prepend `powershell.exe -ExecutionPolicy Bypass -File ` before the path
+   - Example: `powershell.exe -ExecutionPolicy Bypass -File "C:\Users\YourName\ollama-chat\run-windows.ps1"`
+   - Click "OK" to save
+   
+   **Configure a keyboard shortcut:**
+   - Right-click your desktop shortcut and select "Properties"
+   - Click in the "Shortcut key" field
+   - Press your desired key combination (e.g., Ctrl+Alt+O)
+   - Click "OK" to save
+   - Now you can launch Ollama Chat with your keyboard shortcut!
+   
+   **Customize the shortcut appearance:**
+   - Right-click the shortcut and select "Properties"
    - Click "Change Icon..." button
-   - Browse to `C:\Windows\System32\shell32.dll` and select an appropriate icon
+   - Browse to `C:\Windows\System32\shell32.dll` or `C:\Windows\System32\imageres.dll`
+   - Select an appropriate icon (e.g., a chat bubble or terminal icon)
    - Click "OK" to apply
+   
+   **Advanced: Set working directory:**
+   - In the shortcut properties, set "Start in" field to your ollama-chat directory
+   - Example: `C:\Users\YourName\ollama-chat`
+   - This ensures the script runs in the correct directory
 
 ### Linux/macOS
 
@@ -196,6 +221,19 @@ demo.launch(server_name="localhost", server_port=7860)
 - Ensure you're using PowerShell (not Command Prompt)
 - Check execution policy: `Get-ExecutionPolicy`
 - Try running with bypass: `powershell -ExecutionPolicy Bypass -File ".\script.ps1"`
+
+### Shortcut not working
+- Ensure the shortcut target starts with `powershell.exe`
+- Verify the full path to your .ps1 file is correct
+- Check that "Start in" field points to the ollama-chat directory
+- If keyboard shortcut doesn't work:
+  - Ensure no other program uses the same key combination
+  - Try a different combination (e.g., Ctrl+Shift+O)
+  - Some combinations are reserved by Windows and cannot be used
+- If Python is not found when using shortcut:
+  - Add full Python path in the shortcut target
+  - Or ensure Python is in your system PATH
+  - Windows Store Python may require special handling
 
 ### Unicode character errors
 - The scripts use ASCII characters to avoid encoding issues
