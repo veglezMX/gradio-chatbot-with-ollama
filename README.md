@@ -17,41 +17,61 @@ A modern, feature-rich chat interface for Ollama with real-time streaming, model
 - Python 3.8 or higher
 - Ollama installed and running (download from [ollama.ai](https://ollama.ai))
 - At least one Ollama model pulled (e.g., `ollama pull llama3.2`)
+- Windows PowerShell (for Windows users)
 
 ## Quick Start
 
 ### Windows
 
 1. **Clone the repository:**
-   ```cmd
+   ```powershell
    git clone https://github.com/yourusername/ollama-chat.git
    cd ollama-chat
    ```
 
 2. **Run the setup script (first time only):**
-   ```cmd
-   setup-windows.bat
+   ```powershell
+   .\setup-windows.ps1
    ```
 
-3. **Run the application:**
-   ```cmd
-   run-windows.bat
+3. **Choose how to run the application:**
+
+   We provide two launch scripts:
+
+   **Option A: Full-featured script (`run-full-windows.ps1`)**
+   - Automatically starts Ollama if not running
+   - Checks and installs models if needed
+   - May trigger antivirus warnings (see [Antivirus Issues](#antivirus-issues) section)
+   
+   ```powershell
+   .\run-full-windows.ps1
+   ```
+
+   **Option B: Simple script (`run-windows.ps1`)**
+   - No automatic Ollama management
+   - You must ensure Ollama is running before starting
+   - Less likely to trigger antivirus warnings
+   
+   ```powershell
+   .\run-windows.ps1
    ```
 
 4. **Create a desktop shortcut (recommended):**
    
    **Method 1: Using File Explorer**
    - Navigate to your ollama-chat folder in File Explorer
-   - Right-click on `run-windows.bat`
+   - Right-click on your preferred script (`run-windows.ps1` or `run-full-windows.ps1`)
    - Select "Send to" → "Desktop (create shortcut)"
    - Rename the shortcut to "Ollama Chat"
    
-   **Method 2: Manual creation**
-   - Right-click on your desktop
-   - Select "New" → "Shortcut"
-   - Browse to your ollama-chat folder and select `run-windows.bat`
-   - Name the shortcut "Ollama Chat"
-   - Click "Finish"
+   **Method 2: Create a batch launcher**
+   Create a new file `OllamaChat.bat` on your desktop with:
+   ```batch
+   @echo off
+   cd /d "C:\path\to\ollama-chat"
+   powershell -ExecutionPolicy Bypass -File ".\run-windows.ps1"
+   pause
+   ```
    
    **Optional: Customize the shortcut icon**
    - Right-click the desktop shortcut and select "Properties"
@@ -86,6 +106,35 @@ A modern, feature-rich chat interface for Ollama with real-time streaming, model
    ./create-desktop-shortcut.sh
    ```
 
+## Antivirus Issues
+
+### Full-featured Script Warnings
+
+The `run-full-windows.ps1` script may trigger antivirus warnings because it:
+- Starts external processes (Ollama)
+- Makes network requests
+- Downloads models automatically
+
+**Solutions:**
+
+1. **Add to Antivirus Exclusions (if you trust the script):**
+   - **Windows Defender:** Windows Security → Virus & threat protection → Manage settings → Add or remove exclusions → Add an exclusion → File → Select `run-full-windows.ps1`
+   - **Other Antivirus:** Check your antivirus documentation for adding file exclusions
+
+2. **Use the Simple Script:** If you prefer not to modify antivirus settings, use `run-windows.ps1` instead and manually ensure Ollama is running
+
+3. **Run with Bypass:** Execute the script with bypass policy:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File ".\run-full-windows.ps1"
+   ```
+
+### PowerShell Execution Policy
+
+If you get execution policy errors, run PowerShell as Administrator and execute:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
 ## Manual Installation
 
 If you prefer to set up manually:
@@ -97,7 +146,12 @@ If you prefer to set up manually:
 
 2. **Activate the virtual environment:**
    
-   Windows:
+   Windows (PowerShell):
+   ```powershell
+   .\.venv\Scripts\Activate.ps1
+   ```
+   
+   Windows (Command Prompt):
    ```cmd
    .venv\Scripts\activate.bat
    ```
@@ -131,20 +185,37 @@ demo.launch(server_name="localhost", server_port=7860)
 - Ensure Ollama is installed and running
 - Check if Ollama is accessible at `http://localhost:11434`
 - Try running `ollama list` in your terminal
+- If using `run-windows.ps1`, manually start Ollama with `ollama serve`
 
 ### No models available
 - Pull at least one model: `ollama pull llama3.2`
+- Recommended models: `ollama pull deepseek-r1:8b` and `ollama pull gemma3:12b`
 - Restart the application after pulling new models
+
+### PowerShell script errors
+- Ensure you're using PowerShell (not Command Prompt)
+- Check execution policy: `Get-ExecutionPolicy`
+- Try running with bypass: `powershell -ExecutionPolicy Bypass -File ".\script.ps1"`
+
+### Unicode character errors
+- The scripts use ASCII characters to avoid encoding issues
+- If you see strange characters, ensure your terminal supports UTF-8
 
 ### Permission denied on Linux
 - Make scripts executable: `chmod +x *.sh`
 - Run with proper permissions
 
-### cURL not found (Windows)
-If cURL is not found when running the batch files:
-- cURL is included in Windows 10 version 1803 and later
-- For older Windows versions, install cURL manually or update Windows
-- Alternatively, you can skip the Ollama connectivity check and run the app directly
+## Script Differences
+
+### `run-full-windows.ps1`
+- **Pros:** Fully automated, starts Ollama, installs models
+- **Cons:** May trigger antivirus, requires more permissions
+- **Use when:** You want a one-click solution
+
+### `run-windows.ps1`
+- **Pros:** Simple, less likely to trigger antivirus
+- **Cons:** Manual Ollama management required
+- **Use when:** You prefer manual control or have antivirus concerns
 
 ## Contributing
 
