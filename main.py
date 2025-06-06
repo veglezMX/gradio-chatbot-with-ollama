@@ -487,6 +487,8 @@ def create_interface() -> gr.Blocks:
             scale=4
         )
 
+        tokens_so_far = gr.Markdown("Tokens so far: 0")
+
         def update_model_interface(model_name):
             """Update UI based on selected model capabilities."""
             has_thinking = has_thinking_capability(model_name)
@@ -501,28 +503,60 @@ def create_interface() -> gr.Blocks:
             outputs=[model_info, thinking_toggle]
         )
 
-        with gr.Row():
-            gr.ChatInterface(
-                fn=chatbot_response,
-                additional_inputs=[model_dropdown, custom_instructions, thinking_toggle],
-                chatbot=gr.Chatbot(
-                    type="messages",
-                    render_markdown=True,
-                    placeholder="Your AI Assistant Ready to Help!",
-                    layout="bubble"
-                ),
-                type="messages",
-                title="Smart Multi-Model Chat",
-                description="Automatically detects model capabilities and adjusts thinking controls.",
-                example_labels=["Simple Question", "Complex Math", "Coding Problem"],
-                examples=[
-                    ["What is the capital of France?"],
-                    ["Solve this step by step: What's the derivative of x^3 + 2x^2 - 5x + 1?"],
-                    ["Write a Python function to calculate fibonacci numbers efficiently"]
-                ],
-                cache_examples=False,
-                analytics_enabled=False
-            )
+        def approximate_token_count(text: str) -> int:
+            """
+            Roughly approximates the number of tokens in a given text.
+            Uses the formula max(1, len(text) // 3.5).
+            """
+            return max(1, int(len(text) // 3.5))
+
+        def update_token_count(history, user_message, custom_instructions):
+            """
+            Updates the token count based on the conversation history,
+            current user message, and custom instructions.
+            """
+            full_text = ""
+            for chat_message in history:
+                if isinstance(chat_message, list) and len(chat_message) > 1: 
+                    full_text += chat_message[0]["content"] + chat_message[1]["content"] 
+                elif isinstance(chat_message, dict):
+                    full_text += chat_message["content"]
+            full_text += user_message
+            full_text += custom_instructions
+            
+            token_count = approximate_token_count(full_text)
+            return f"Tokens so far: {token_count}"
+
+        chatbot = gr.Chatbot(
+            type="messages",
+            render_markdown=True,
+            placeholder="Your AI Assistant Ready to Help!",
+            layout="bubble"
+        )
+
+        chat_interface = gr.ChatInterface(
+            fn=chatbot_response,
+            additional_inputs=[model_dropdown, custom_instructions, thinking_toggle],
+            chatbot=chatbot,
+            type="messages",
+            title="Smart Multi-Model Chat",
+            description="Automatically detects model capabilities and adjusts thinking controls.",
+            example_labels=["Simple Question", "Complex Math", "Coding Problem"],
+            examples=[
+                ["What is the capital of France?"],
+                ["Solve this step by step: What's the derivative of x^3 + 2x^2 - 5x + 1?"],
+                ["Write a Python function to calculate fibonacci numbers efficiently"]
+            ],
+            cache_examples=False,
+            analytics_enabled=False
+        )
+
+        # Connect the submit event to the token count update function
+        chat_interface.textbox.submit(
+            update_token_count,
+            [chat_interface.chatbot, chat_interface.textbox, custom_instructions],
+            tokens_so_far
+        )
 
         def load_models():
             """Refresh available models in dropdown."""
