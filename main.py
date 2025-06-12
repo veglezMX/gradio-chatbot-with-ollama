@@ -21,7 +21,7 @@ class OllamaClient:
         base_url = os.getenv("OLLOMA_BASE_URL", base_url)
         self.base_url = base_url
         self.session = requests.Session()
-        self.timeout = 30
+        self.timeout = 120
 
     def fetch_models(self) -> list[str]:
         """Retrieve available models from Ollama."""
@@ -148,7 +148,7 @@ def extract_model_details(model_name: str) -> dict:
     return details
 
 
-def format_model_info(model_name: str) -> str:
+def format_model_info(model_name: Optional[str]) -> str:
     """Format model information based on available data."""
     if not model_name:
         return "Select a model to see available information"
@@ -309,10 +309,8 @@ class ChatStreamer:
             if assistant_text:
                 return [[self.thinking_message, gr.ChatMessage(content=assistant_text, role="assistant")]]
             else:
-                # If there's no text after the thinking tag, just return the thinking message
                 return [self.thinking_message]
         elif self.thinking_message is not None and self.THINK_START_TAG in self.accumulated_text:
-            # Thinking started but never ended - finalize it
             self.thinking_message.metadata["status"] = "done"
             if self.thinking_start_time:
                 self.thinking_message.metadata["time"] = time.time() - self.thinking_start_time
@@ -400,7 +398,7 @@ def prepare_prompt_deepseek(
     
     return "\n".join(prompt_parts)
 
-def has_thinking_capability(model_name: str) -> bool:
+def has_thinking_capability(model_name: Optional[str]) -> bool:
     if not model_name or not isinstance(model_name, str):
         return False
     
@@ -551,7 +549,6 @@ def create_interface() -> gr.Blocks:
             analytics_enabled=False
         )
 
-        # Connect the submit event to the token count update function
         chat_interface.textbox.submit(
             update_token_count,
             [chat_interface.chatbot, chat_interface.textbox, custom_instructions],
@@ -563,7 +560,6 @@ def create_interface() -> gr.Blocks:
             models = OllamaClient().fetch_models()
             selected_model = models[0] if models else None
             
-            # Update both dropdown and thinking toggle visibility
             has_thinking = has_thinking_capability(selected_model)
             info_text = format_model_info(selected_model)
             
