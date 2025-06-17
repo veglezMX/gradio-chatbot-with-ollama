@@ -525,11 +525,33 @@ def create_interface() -> gr.Blocks:
             token_count = approximate_token_count(full_text)
             return f"Tokens so far: {token_count}"
 
+        # add switch to render markdown in chat messages
+        render_markdown = gr.Checkbox(
+            label="Render Markdown in Chat",
+            value=False,
+            visible=True,
+            info="Enable to render markdown in chat messages"
+        )
+
+        def update_render_markdown(value: bool):
+            """Update the chatbot to render markdown based on checkbox."""
+            return gr.Chatbot(render_markdown=value)
+        
+
         chatbot = gr.Chatbot(
             type="messages",
-            render_markdown=True,
+            render_markdown=render_markdown.value,
+            sanitize_html=False,
+            show_copy_button=True,
+            show_copy_all_button=True,
             placeholder="Your AI Assistant Ready to Help!",
-            layout="bubble"
+            layout="bubble",
+        )
+
+        render_markdown.change(
+            update_render_markdown,
+            inputs=render_markdown,
+            outputs=[chatbot]
         )
 
         chat_interface = gr.ChatInterface(
